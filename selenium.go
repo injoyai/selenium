@@ -1,8 +1,6 @@
 package selenium
 
 import (
-	"time"
-
 	"github.com/tebeka/selenium/chrome"
 	"github.com/tebeka/selenium/firefox"
 	"github.com/tebeka/selenium/log"
@@ -255,6 +253,7 @@ type PointerAction map[string]interface{}
 // Actions stores KeyActions and PointerActions for later execution.
 type Actions []map[string]interface{}
 
+/*
 // WebDriver defines methods supported by WebDriver drivers.
 type WebDriver interface {
 	// Status returns various pieces of information about the server environment.
@@ -262,12 +261,6 @@ type WebDriver interface {
 
 	// NewSession starts a new session and returns the session ID.
 	NewSession() (string, error)
-
-	// SessionId returns the current session ID
-	//
-	// Deprecated: This identifier is not Go-style correct. Use SessionID
-	// instead.
-	SessionId() string
 
 	// SessionID returns the current session ID.
 	SessionID() string
@@ -431,6 +424,9 @@ type WebDriver interface {
 	//Wait works like WaitWithTimeoutAndInterval, but using the default timeout and polling interval.
 	Wait(condition Condition) error
 }
+
+
+*/
 
 // WebElement defines method supported by web elements.
 type WebElement interface {
