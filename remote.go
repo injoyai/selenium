@@ -9,6 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/blang/semver"
+	"github.com/injoyai/goutil/oss"
+	"github.com/injoyai/logs"
+	"github.com/injoyai/selenium/firefox"
+	"github.com/injoyai/selenium/log"
 	"io/ioutil"
 	"mime"
 	"net/http"
@@ -16,10 +21,6 @@ import (
 	"path"
 	"strings"
 	"time"
-
-	"github.com/blang/semver"
-	"github.com/injoyai/selenium/firefox"
-	"github.com/injoyai/selenium/log"
 )
 
 // Errors returned by Selenium server.
@@ -54,6 +55,8 @@ type RemoteWD struct {
 	storedActions  Actions
 	browser        string
 	browserVersion semver.Version
+
+	handler string
 }
 
 // Copy 复制实例,可以生成多个标签页的实例
@@ -145,7 +148,7 @@ func (wd *RemoteWD) execute(method, url string, data []byte) (json.RawMessage, e
 }
 
 func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
-	debugLog("-> %s %s\n%s", method, filteredURL(url), data)
+	logs.Debug("-> %s %s\n%s\n", method, filteredURL(url), data)
 	request, err := newRequest(method, url, data)
 	if err != nil {
 		return nil, err
@@ -157,7 +160,7 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 	}
 
 	buf, err := ioutil.ReadAll(response.Body)
-	if debugFlag {
+	{
 		if err == nil {
 			// Pretty print the JSON response
 			var prettyBuf bytes.Buffer
@@ -165,7 +168,7 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 				buf = prettyBuf.Bytes()
 			}
 		}
-		debugLog("<- %s [%s]\n%s", response.Status, response.Header["Content-Type"], buf)
+		logs.Debug("<- %s [%s]\n%s\n", response.Status, response.Header["Content-Type"], buf)
 	}
 	if err != nil {
 		return nil, errors.New(response.Status)
@@ -524,7 +527,7 @@ func (wd *RemoteWD) NewSession() (string, error) {
 				}
 				v, err := parseVersion(s)
 				if err != nil {
-					debugLog("error parsing version: %v\n", err)
+					logs.Error("error parsing version: %v\n", err)
 					continue
 				}
 				wd.browserVersion = v
@@ -698,6 +701,37 @@ func (wd *RemoteWD) find(by, value, suffix, url string) ([]byte, error) {
 	return wd.execute("POST", wd.requestURL(url+suffix, wd.id), data)
 }
 
+func (wd *RemoteWD) findHandler(by, value, suffix, url string, handler string) ([]byte, error) {
+	// The W3C specification removed the specific ID and Name locator strategies,
+	// instead only providing a CSS-based strategy. Emulate the old behavior to
+	// maintain API compatibility.
+	if wd.w3cCompatible {
+		switch by {
+		case ByID:
+			by = ByCSSSelector
+			value = "#" + value
+		case ByName:
+			by = ByCSSSelector
+			value = fmt.Sprintf("input[name=%q]", value)
+		}
+	}
+
+	params := map[string]string{
+		"using": by,
+		"value": value,
+	}
+	data, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(url) == 0 {
+		url = "/session/%s/window/%s/element"
+	}
+
+	return wd.execute("POST", wd.requestURL(url+suffix, wd.id, handler), data)
+}
+
 func (wd *RemoteWD) DecodeElement(data []byte) (WebElement, error) {
 	reply := new(struct{ Value map[string]string })
 	if err := json.Unmarshal(data, &reply); err != nil {
@@ -767,6 +801,15 @@ func (wd *RemoteWD) FindElement(by, value string) (WebElement, error) {
 
 func (wd *RemoteWD) FindElements(by, value string) ([]WebElement, error) {
 	response, err := wd.find(by, value, "s", "")
+	if err != nil {
+		return nil, err
+	}
+
+	return wd.DecodeElements(response)
+}
+
+func (wd *RemoteWD) FindHandlerElements(by, value string, handler string) ([]WebElement, error) {
+	response, err := wd.findHandler(by, value, "s", "", handler)
 	if err != nil {
 		return nil, err
 	}
@@ -1577,7 +1620,7 @@ func (elem *remoteWE) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (elem *remoteWE) Screenshot(scroll bool) ([]byte, error) {
+func (elem *remoteWE) Screenshot() ([]byte, error) {
 	data, err := elem.parent.stringCommand(fmt.Sprintf("/session/%%s/element/%s/screenshot", elem.id))
 	if err != nil {
 		return nil, err
@@ -1587,4 +1630,12 @@ func (elem *remoteWE) Screenshot(scroll bool) ([]byte, error) {
 	buf := []byte(data)
 	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
 	return ioutil.ReadAll(decoder)
+}
+
+func (elem *remoteWE) SaveScreenshot(filename string) error {
+	data, err := elem.Screenshot()
+	if err != nil {
+		return err
+	}
+	return oss.New(filename, data)
 }

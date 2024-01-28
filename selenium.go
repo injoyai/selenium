@@ -473,5 +473,5 @@ type WebElement interface {
 	// element.
 	CSSProperty(name string) (string, error)
 	// Screenshot takes a screenshot of the attribute scroll'ing if necessary.
-	Screenshot(scroll bool) ([]byte, error)
+	Screenshot() ([]byte, error)
 }

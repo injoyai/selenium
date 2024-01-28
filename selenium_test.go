@@ -144,7 +144,7 @@ func runChromeTests(t *testing.T, c seleniumtest.Config) {
 		c.ServiceOptions = append(c.ServiceOptions, selenium.StartFrameBuffer())
 	}
 	if testing.Verbose() {
-		selenium.SetDebug(true)
+		//selenium.SetDebug(true)
 		c.ServiceOptions = append(c.ServiceOptions, selenium.Output(os.Stderr))
 	}
 
@@ -218,9 +218,9 @@ func TestHTMLUnit(t *testing.T) {
 		t.Skipf("Skipping HTMLUnit tests because the HTMLUnit Driver JAR not found at path %q", *htmlUnitDriverPath)
 	}
 
-	if testing.Verbose() {
-		selenium.SetDebug(true)
-	}
+	//if testing.Verbose() {
+	//selenium.SetDebug(true)
+	//}
 
 	c := seleniumtest.Config{
 		Browser:         "htmlunit",
@@ -259,7 +259,7 @@ func runFirefoxTests(t *testing.T, webDriverPath string, c seleniumtest.Config) 
 		c.ServiceOptions = append(c.ServiceOptions, selenium.StartFrameBuffer())
 	}
 	if testing.Verbose() {
-		selenium.SetDebug(true)
+		//selenium.SetDebug(true)
 		c.ServiceOptions = append(c.ServiceOptions, selenium.Output(os.Stderr))
 	}
 	if *javaPath != "" {

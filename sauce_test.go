@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/blang/semver"
-	"github.com/injoyai/selenium"
 	"github.com/injoyai/selenium/internal/seleniumtest"
 	"github.com/injoyai/selenium/sauce"
 )
@@ -23,9 +22,9 @@ func TestSauce(t *testing.T) {
 	if !*enableSauce {
 		t.Skip("Skipping Sauce tests. Enable via --experimental_sauce_tests")
 	}
-	if testing.Verbose() {
-		selenium.SetDebug(true)
-	}
+	//if testing.Verbose() {
+	//	selenium.SetDebug(true)
+	//}
 	if *sauceUserName == "" {
 		t.Fatalf("--sauce_user_name is required.")
 	}
