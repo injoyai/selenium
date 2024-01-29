@@ -10,6 +10,7 @@ require (
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/golang/protobuf v1.5.3
 	github.com/google/go-cmp v0.5.9
+	github.com/injoyai/conv v1.1.2
 	github.com/injoyai/goutil v0.0.0-20240127144620-afd71b10843c
 	github.com/injoyai/logs v1.0.7
 	github.com/mediabuyerbot/go-crx3 v1.3.1

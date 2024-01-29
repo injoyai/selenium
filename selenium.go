@@ -427,7 +427,7 @@ type WebDriver interface {
 
 
 */
-
+/*
 // WebElement defines method supported by web elements.
 type WebElement interface {
 	// Click clicks on the element.
@@ -444,7 +444,7 @@ type WebElement interface {
 
 	// FindElement finds a child element.
 	FindElement(by, value string) (WebElement, error)
-	// FindElement finds multiple children elements.
+	// FindElements finds multiple children elements.
 	FindElements(by, value string) ([]WebElement, error)
 
 	// TagName returns the element's name.
@@ -475,3 +475,4 @@ type WebElement interface {
 	// Screenshot takes a screenshot of the attribute scroll'ing if necessary.
 	Screenshot() ([]byte, error)
 }
+*/

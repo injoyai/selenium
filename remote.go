@@ -14,7 +14,7 @@ import (
 	"github.com/injoyai/logs"
 	"github.com/injoyai/selenium/firefox"
 	"github.com/injoyai/selenium/log"
-	"io/ioutil"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -47,7 +47,7 @@ var remoteErrors = map[int]string{
 	32: "invalid selector",
 }
 
-type RemoteWD struct {
+type WebDriver struct {
 	id, urlPrefix string
 	capabilities  Capabilities
 	w3cCompatible bool
@@ -56,31 +56,14 @@ type RemoteWD struct {
 	browser        string
 	browserVersion semver.Version
 
-	handler string
+	wait
 }
 
 // Copy 复制实例,可以生成多个标签页的实例
-func (this *RemoteWD) Copy() *RemoteWD {
+func (this *WebDriver) Copy() *WebDriver {
 	x := *this
 	return &x
 }
-
-// SetSessionID 设置事务ID
-func (this *RemoteWD) SetSessionID(id string) *RemoteWD {
-	this.id = id
-	return this
-}
-
-func (this *RemoteWD) NewSeesion(sessionID string) *RemoteWD {
-	return this.Copy().SetSessionID(sessionID)
-}
-
-// HTTPClient is the default client to use to communicate with the WebDriver
-// server.
-var HTTPClient = http.DefaultClient
-
-// jsonContentType is JSON content type.
-const jsonContentType = "application/json"
 
 func newRequest(method string, url string, data []byte) (*http.Request, error) {
 	request, err := http.NewRequest(method, url, bytes.NewBuffer(data))
@@ -88,11 +71,10 @@ func newRequest(method string, url string, data []byte) (*http.Request, error) {
 		return nil, err
 	}
 	request.Header.Add("Accept", jsonContentType)
-
 	return request, nil
 }
 
-func (wd *RemoteWD) requestURL(template string, args ...interface{}) string {
+func (wd *WebDriver) requestURL(template string, args ...interface{}) string {
 	return wd.urlPrefix + fmt.Sprintf(template, args...)
 }
 
@@ -143,12 +125,12 @@ func (e *Error) Error() string {
 // execute performs an HTTP request and inspects the returned data for an error
 // encoded by the remote end in a JSON structure. If no error is present, the
 // entire, raw request payload is returned.
-func (wd *RemoteWD) execute(method, url string, data []byte) (json.RawMessage, error) {
+func (wd *WebDriver) execute(method, url string, data []byte) (json.RawMessage, error) {
 	return executeCommand(method, url, data)
 }
 
 func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
-	logs.Debug("-> %s %s\n%s\n", method, filteredURL(url), data)
+	logs.Debugf("-> %s %s\n%s\n", method, filteredURL(url), string(data))
 	request, err := newRequest(method, url, data)
 	if err != nil {
 		return nil, err
@@ -159,7 +141,7 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 
-	buf, err := ioutil.ReadAll(response.Body)
+	buf, err := io.ReadAll(response.Body)
 	{
 		if err == nil {
 			// Pretty print the JSON response
@@ -168,7 +150,7 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 				buf = prettyBuf.Bytes()
 			}
 		}
-		logs.Debug("<- %s [%s]\n%s\n", response.Status, response.Header["Content-Type"], buf)
+		logs.Debugf("<- %s %s\n%s\n", response.Status, response.Header["Content-Type"], string(buf))
 	}
 	if err != nil {
 		return nil, errors.New(response.Status)
@@ -229,21 +211,18 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 	return buf, nil
 }
 
-// DefaultURLPrefix is the default HTTP endpoint that offers the WebDriver API.
-const DefaultURLPrefix = "http://127.0.0.1:4444/wd/hub"
-
 // NewRemote creates new remote client, this will also start a new session.
 // capabilities provides the desired capabilities. urlPrefix is the URL to the
 // Selenium server, must be prefixed with protocol (http, https, ...).
 //
 // Providing an empty string for urlPrefix causes the DefaultURLPrefix to be
 // used.
-func NewRemote(capabilities Capabilities, urlPrefix string) (*RemoteWD, error) {
+func NewRemote(capabilities Capabilities, urlPrefix string) (*WebDriver, error) {
 	if urlPrefix == "" {
 		urlPrefix = DefaultURLPrefix
 	}
 
-	wd := &RemoteWD{
+	wd := &WebDriver{
 		urlPrefix:    urlPrefix,
 		capabilities: capabilities,
 	}
@@ -268,7 +247,7 @@ func DeleteSession(urlPrefix, id string) error {
 	return voidCommand("DELETE", u.String(), nil)
 }
 
-func (wd *RemoteWD) stringCommand(urlTemplate string) (string, error) {
+func (wd *WebDriver) stringCommand(urlTemplate string) (string, error) {
 	url := wd.requestURL(urlTemplate, wd.id)
 	response, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -299,11 +278,11 @@ func voidCommand(method, url string, params interface{}) error {
 	return err
 }
 
-func (wd *RemoteWD) voidCommand(urlTemplate string, params interface{}) error {
+func (wd *WebDriver) voidCommand(urlTemplate string, params interface{}) error {
 	return voidCommand("POST", wd.requestURL(urlTemplate, wd.id), params)
 }
 
-func (wd RemoteWD) stringsCommand(urlTemplate string) ([]string, error) {
+func (wd *WebDriver) stringsCommand(urlTemplate string) ([]string, error) {
 	url := wd.requestURL(urlTemplate, wd.id)
 	response, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -318,7 +297,7 @@ func (wd RemoteWD) stringsCommand(urlTemplate string) ([]string, error) {
 	return reply.Value, nil
 }
 
-func (wd *RemoteWD) boolCommand(urlTemplate string) (bool, error) {
+func (wd *WebDriver) boolCommand(urlTemplate string) (bool, error) {
 	url := wd.requestURL(urlTemplate, wd.id)
 	response, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -333,7 +312,7 @@ func (wd *RemoteWD) boolCommand(urlTemplate string) (bool, error) {
 	return reply.Value, nil
 }
 
-func (wd *RemoteWD) Status() (*Status, error) {
+func (wd *WebDriver) Status() (*Status, error) {
 	url := wd.requestURL("/status")
 	reply, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -426,7 +405,7 @@ func newW3CCapabilities(caps Capabilities) Capabilities {
 	}
 }
 
-func (wd *RemoteWD) NewSession() (string, error) {
+func (wd *WebDriver) NewSession() (string, error) {
 	// Detect whether the remote end complies with the W3C specification:
 	// non-compliant implementations use the top-level 'desiredCapabilities' JSON
 	// key, whereas the specification mandates the 'capabilities' key.
@@ -540,16 +519,16 @@ func (wd *RemoteWD) NewSession() (string, error) {
 }
 
 // SessionID returns the current session ID
-func (wd *RemoteWD) SessionID() string {
+func (wd *WebDriver) SessionID() string {
 	return wd.id
 }
 
-func (wd *RemoteWD) SwitchSession(sessionID string) error {
+func (wd *WebDriver) SwitchSession(sessionID string) error {
 	wd.id = sessionID
 	return nil
 }
 
-func (wd *RemoteWD) Capabilities() (Capabilities, error) {
+func (wd *WebDriver) Capabilities() (Capabilities, error) {
 	url := wd.requestURL("/session/%s", wd.id)
 	response, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -564,7 +543,7 @@ func (wd *RemoteWD) Capabilities() (Capabilities, error) {
 	return c.Value, nil
 }
 
-func (wd *RemoteWD) SetAsyncScriptTimeout(timeout time.Duration) error {
+func (wd *WebDriver) SetAsyncScriptTimeout(timeout time.Duration) error {
 	if !wd.w3cCompatible {
 		return wd.voidCommand("/session/%s/timeouts/async_script", map[string]uint{
 			"ms": uint(timeout / time.Millisecond),
@@ -575,7 +554,7 @@ func (wd *RemoteWD) SetAsyncScriptTimeout(timeout time.Duration) error {
 	})
 }
 
-func (wd *RemoteWD) SetImplicitWaitTimeout(timeout time.Duration) error {
+func (wd *WebDriver) SetImplicitWaitTimeout(timeout time.Duration) error {
 	if !wd.w3cCompatible {
 		return wd.voidCommand("/session/%s/timeouts/implicit_wait", map[string]uint{
 			"ms": uint(timeout / time.Millisecond),
@@ -586,7 +565,7 @@ func (wd *RemoteWD) SetImplicitWaitTimeout(timeout time.Duration) error {
 	})
 }
 
-func (wd *RemoteWD) SetPageLoadTimeout(timeout time.Duration) error {
+func (wd *WebDriver) SetPageLoadTimeout(timeout time.Duration) error {
 	if !wd.w3cCompatible {
 		return wd.voidCommand("/session/%s/timeouts", map[string]interface{}{
 			"ms":   uint(timeout / time.Millisecond),
@@ -598,7 +577,7 @@ func (wd *RemoteWD) SetPageLoadTimeout(timeout time.Duration) error {
 	})
 }
 
-func (wd *RemoteWD) Quit() error {
+func (wd *WebDriver) Quit() error {
 	if wd.id == "" {
 		return nil
 	}
@@ -609,21 +588,21 @@ func (wd *RemoteWD) Quit() error {
 	return err
 }
 
-func (wd *RemoteWD) CurrentWindowHandle() (string, error) {
+func (wd *WebDriver) CurrentWindowHandle() (string, error) {
 	if !wd.w3cCompatible {
 		return wd.stringCommand("/session/%s/window_handle")
 	}
 	return wd.stringCommand("/session/%s/window")
 }
 
-func (wd *RemoteWD) WindowHandles() ([]string, error) {
+func (wd *WebDriver) WindowHandles() ([]string, error) {
 	if !wd.w3cCompatible {
 		return wd.stringsCommand("/session/%s/window_handles")
 	}
 	return wd.stringsCommand("/session/%s/window/handles")
 }
 
-func (wd *RemoteWD) CurrentURL() (string, error) {
+func (wd *WebDriver) CurrentURL() (string, error) {
 	url := wd.requestURL("/session/%s/url", wd.id)
 	response, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -637,7 +616,7 @@ func (wd *RemoteWD) CurrentURL() (string, error) {
 	return *reply.Value, nil
 }
 
-func (wd *RemoteWD) Get(url string) error {
+func (wd *WebDriver) Get(url string) error {
 	requestURL := wd.requestURL("/session/%s/url", wd.id)
 	params := map[string]string{
 		"url": url,
@@ -650,27 +629,31 @@ func (wd *RemoteWD) Get(url string) error {
 	return err
 }
 
-func (wd *RemoteWD) Forward() error {
+func (wd *WebDriver) Forward() error {
 	return wd.voidCommand("/session/%s/forward", nil)
 }
 
-func (wd *RemoteWD) Back() error {
+func (wd *WebDriver) Back() error {
 	return wd.voidCommand("/session/%s/back", nil)
 }
 
-func (wd *RemoteWD) Refresh() error {
+func (wd *WebDriver) Refresh() error {
 	return wd.voidCommand("/session/%s/refresh", nil)
 }
 
-func (wd *RemoteWD) Title() (string, error) {
+func (wd *WebDriver) Title() (string, error) {
 	return wd.stringCommand("/session/%s/title")
 }
 
-func (wd *RemoteWD) PageSource() (string, error) {
+func (wd *WebDriver) PageSource() (string, error) {
 	return wd.stringCommand("/session/%s/source")
 }
 
-func (wd *RemoteWD) find(by, value, suffix, url string) ([]byte, error) {
+func (wd *WebDriver) Text() (string, error) {
+	return wd.PageSource()
+}
+
+func (wd *WebDriver) find(by, value, suffix, url string) ([]byte, error) {
 	// The W3C specification removed the specific ID and Name locator strategies,
 	// instead only providing a CSS-based strategy. Emulate the old behavior to
 	// maintain API compatibility.
@@ -701,38 +684,7 @@ func (wd *RemoteWD) find(by, value, suffix, url string) ([]byte, error) {
 	return wd.execute("POST", wd.requestURL(url+suffix, wd.id), data)
 }
 
-func (wd *RemoteWD) findHandler(by, value, suffix, url string, handler string) ([]byte, error) {
-	// The W3C specification removed the specific ID and Name locator strategies,
-	// instead only providing a CSS-based strategy. Emulate the old behavior to
-	// maintain API compatibility.
-	if wd.w3cCompatible {
-		switch by {
-		case ByID:
-			by = ByCSSSelector
-			value = "#" + value
-		case ByName:
-			by = ByCSSSelector
-			value = fmt.Sprintf("input[name=%q]", value)
-		}
-	}
-
-	params := map[string]string{
-		"using": by,
-		"value": value,
-	}
-	data, err := json.Marshal(params)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(url) == 0 {
-		url = "/session/%s/window/%s/element"
-	}
-
-	return wd.execute("POST", wd.requestURL(url+suffix, wd.id, handler), data)
-}
-
-func (wd *RemoteWD) DecodeElement(data []byte) (WebElement, error) {
+func (wd *WebDriver) DecodeElement(data []byte) (*WebElement, error) {
 	reply := new(struct{ Value map[string]string })
 	if err := json.Unmarshal(data, &reply); err != nil {
 		return nil, err
@@ -742,7 +694,7 @@ func (wd *RemoteWD) DecodeElement(data []byte) (WebElement, error) {
 	if id == "" {
 		return nil, fmt.Errorf("invalid element returned: %+v", reply)
 	}
-	return &remoteWE{
+	return &WebElement{
 		parent: wd,
 		id:     id,
 	}, nil
@@ -770,19 +722,19 @@ func elementIDFromValue(v map[string]string) string {
 	return ""
 }
 
-func (wd *RemoteWD) DecodeElements(data []byte) ([]WebElement, error) {
+func (wd *WebDriver) DecodeElements(data []byte) ([]*WebElement, error) {
 	reply := new(struct{ Value []map[string]string })
 	if err := json.Unmarshal(data, reply); err != nil {
 		return nil, err
 	}
 
-	elems := make([]WebElement, len(reply.Value))
+	elems := make([]*WebElement, len(reply.Value))
 	for i, elem := range reply.Value {
 		id := elementIDFromValue(elem)
 		if id == "" {
 			return nil, fmt.Errorf("invalid element returned: %+v", reply)
 		}
-		elems[i] = &remoteWE{
+		elems[i] = &WebElement{
 			parent: wd,
 			id:     id,
 		}
@@ -791,7 +743,7 @@ func (wd *RemoteWD) DecodeElements(data []byte) ([]WebElement, error) {
 	return elems, nil
 }
 
-func (wd *RemoteWD) FindElement(by, value string) (WebElement, error) {
+func (wd *WebDriver) FindElement(by, value string) (*WebElement, error) {
 	response, err := wd.find(by, value, "", "")
 	if err != nil {
 		return nil, err
@@ -799,7 +751,7 @@ func (wd *RemoteWD) FindElement(by, value string) (WebElement, error) {
 	return wd.DecodeElement(response)
 }
 
-func (wd *RemoteWD) FindElements(by, value string) ([]WebElement, error) {
+func (wd *WebDriver) FindElements(by, value string) ([]*WebElement, error) {
 	response, err := wd.find(by, value, "s", "")
 	if err != nil {
 		return nil, err
@@ -808,22 +760,91 @@ func (wd *RemoteWD) FindElements(by, value string) ([]WebElement, error) {
 	return wd.DecodeElements(response)
 }
 
-func (wd *RemoteWD) FindHandlerElements(by, value string, handler string) ([]WebElement, error) {
-	response, err := wd.findHandler(by, value, "s", "", handler)
+// FindAll 查找所有元素
+func (this *WebDriver) FindAll(by, value string) ([]*WebElement, error) {
+	return this.FindElements(by, value)
+}
+
+// Find 查找一个元素
+func (this *WebDriver) Find(by, value string) (*WebElement, error) {
+	return this.FindElement(by, value)
+}
+
+// FindTagAttributes 查找所有标签的属性Attribute,例如a.href
+func (this *WebDriver) FindTagAttributes(tag string) ([]string, error) {
+	tagList := strings.Split(tag, ".")
+	name := tagList[len(tagList)-1]
+	es, err := this.FindTags(strings.Join(tagList[:len(tagList)-1], "."))
 	if err != nil {
 		return nil, err
 	}
-
-	return wd.DecodeElements(response)
+	list := []string(nil)
+	for _, v := range es {
+		//标签不一定有这个属性,固忽略错误
+		s, err := v.GetAttribute(name)
+		if err == nil {
+			switch s {
+			case "", "javascript:;":
+			default:
+				list = append(list, s)
+			}
+		}
+	}
+	return list, nil
 }
 
-func (wd *RemoteWD) Close() error {
+// RangeTags 遍历标签,例如a标签
+func (this *WebDriver) RangeTags(tag string, f func(*WebElement) error) error {
+	es, err := this.FindTags(tag)
+	if err != nil {
+		return err
+	}
+	for _, e := range es {
+		if err = f(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FindTags 查找所有标签,例如a标签,href在a标签里面
+func (this *WebDriver) FindTags(tag string) ([]*WebElement, error) {
+	var es []*WebElement
+	var err error
+	tagList := strings.Split(tag, ".")
+	for i, v := range tagList {
+		if i == 0 {
+			es, err = this.FindElements(ByTagName, v)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			es2 := []*WebElement(nil)
+			for _, e := range es {
+				es, err = e.FindElements(ByTagName, v)
+				if err != nil {
+					return nil, err
+				}
+				es2 = append(es2, es...)
+			}
+			es = es2
+		}
+	}
+	return es, err
+}
+
+// FindTag 查找标签,例如a标签
+func (this *WebDriver) FindTag(tag string) (*WebElement, error) {
+	return this.FindElement(ByTagName, tag)
+}
+
+func (wd *WebDriver) Close() error {
 	url := wd.requestURL("/session/%s/window", wd.id)
 	_, err := wd.execute("DELETE", url, nil)
 	return err
 }
 
-func (wd *RemoteWD) SwitchWindow(name string) error {
+func (wd *WebDriver) SwitchWindow(name string) error {
 	params := make(map[string]string)
 	if !wd.w3cCompatible {
 		params["name"] = name
@@ -833,11 +854,11 @@ func (wd *RemoteWD) SwitchWindow(name string) error {
 	return wd.voidCommand("/session/%s/window", params)
 }
 
-func (wd *RemoteWD) CloseWindow(name string) error {
+func (wd *WebDriver) CloseWindow(name string) error {
 	return wd.modifyWindow(name, "DELETE", "", nil)
 }
 
-func (wd *RemoteWD) MaximizeWindow(name string) error {
+func (wd *WebDriver) MaximizeWindow(name string) error {
 	if !wd.w3cCompatible {
 		if name != "" {
 			var err error
@@ -853,11 +874,11 @@ func (wd *RemoteWD) MaximizeWindow(name string) error {
 	return wd.modifyWindow(name, "POST", "maximize", map[string]string{})
 }
 
-func (wd *RemoteWD) MinimizeWindow(name string) error {
+func (wd *WebDriver) MinimizeWindow(name string) error {
 	return wd.modifyWindow(name, "POST", "minimize", map[string]string{})
 }
 
-func (wd *RemoteWD) modifyWindow(name, verb, command string, params interface{}) error {
+func (wd *WebDriver) modifyWindow(name, verb, command string, params interface{}) error {
 	// The original protocol allowed for maximizing any named window. The W3C
 	// specification only allows the current window be be modified. Emulate the
 	// previous behavior by switching to the target window, maximizing the
@@ -907,7 +928,7 @@ func (wd *RemoteWD) modifyWindow(name, verb, command string, params interface{})
 	return nil
 }
 
-func (wd *RemoteWD) ResizeWindow(name string, width, height int) error {
+func (wd *WebDriver) ResizeWindow(name string, width, height int) error {
 	if !wd.w3cCompatible {
 		return wd.modifyWindow(name, "POST", "size", map[string]int{
 			"width":  width,
@@ -920,7 +941,7 @@ func (wd *RemoteWD) ResizeWindow(name string, width, height int) error {
 	})
 }
 
-func (wd *RemoteWD) SwitchFrame(frame interface{}) error {
+func (wd *WebDriver) SwitchFrame(frame interface{}) error {
 	params := map[string]interface{}{}
 	switch f := frame.(type) {
 	case WebElement, int, nil:
@@ -943,7 +964,7 @@ func (wd *RemoteWD) SwitchFrame(frame interface{}) error {
 	return wd.voidCommand("/session/%s/frame", params)
 }
 
-func (wd *RemoteWD) ActiveElement() (WebElement, error) {
+func (wd *WebDriver) ActiveElement() (*WebElement, error) {
 	verb := "GET"
 	if wd.browser == "firefox" && wd.browserVersion.Major < 47 {
 		verb = "POST"
@@ -1006,7 +1027,7 @@ func (c cookie) sanitize() Cookie {
 	}
 }
 
-func (wd *RemoteWD) GetCookie(name string) (Cookie, error) {
+func (wd *WebDriver) GetCookie(name string) (Cookie, error) {
 	if wd.browser == "chrome" {
 		cs, err := wd.GetCookies()
 		if err != nil {
@@ -1043,7 +1064,7 @@ func (wd *RemoteWD) GetCookie(name string) (Cookie, error) {
 	return listReply.Value[0].sanitize(), nil
 }
 
-func (wd *RemoteWD) GetCookies() ([]Cookie, error) {
+func (wd *WebDriver) GetCookies() ([]Cookie, error) {
 	url := wd.requestURL("/session/%s/cookie", wd.id)
 	data, err := wd.execute("GET", url, nil)
 	if err != nil {
@@ -1062,54 +1083,54 @@ func (wd *RemoteWD) GetCookies() ([]Cookie, error) {
 	return cookies, nil
 }
 
-func (wd *RemoteWD) AddCookie(cookie *Cookie) error {
+func (wd *WebDriver) AddCookie(cookie *Cookie) error {
 	return wd.voidCommand("/session/%s/cookie", map[string]*Cookie{
 		"cookie": cookie,
 	})
 }
 
-func (wd *RemoteWD) DeleteAllCookies() error {
+func (wd *WebDriver) DeleteAllCookies() error {
 	url := wd.requestURL("/session/%s/cookie", wd.id)
 	_, err := wd.execute("DELETE", url, nil)
 	return err
 }
 
-func (wd *RemoteWD) DeleteCookie(name string) error {
+func (wd *WebDriver) DeleteCookie(name string) error {
 	url := wd.requestURL("/session/%s/cookie/%s", wd.id, name)
 	_, err := wd.execute("DELETE", url, nil)
 	return err
 }
 
-// TODO(minusnine): add a test for Click.
-func (wd *RemoteWD) Click(button int) error {
+// Click TODO(minusnine): add a test for Click.
+func (wd *WebDriver) Click(button int) error {
 	return wd.voidCommand("/session/%s/click", map[string]int{
 		"button": button,
 	})
 }
 
-// TODO(minusnine): add a test for DoubleClick.
-func (wd *RemoteWD) DoubleClick() error {
+// DoubleClick TODO(minusnine): add a test for DoubleClick.
+func (wd *WebDriver) DoubleClick() error {
 	return wd.voidCommand("/session/%s/doubleclick", nil)
 }
 
-// TODO(minusnine): add a test for ButtonDown.
-func (wd *RemoteWD) ButtonDown() error {
+// ButtonDown TODO(minusnine): add a test for ButtonDown.
+func (wd *WebDriver) ButtonDown() error {
 	return wd.voidCommand("/session/%s/buttondown", nil)
 }
 
-// TODO(minusnine): add a test for ButtonUp.
-func (wd *RemoteWD) ButtonUp() error {
+// ButtonUp TODO(minusnine): add a test for ButtonUp.
+func (wd *WebDriver) ButtonUp() error {
 	return wd.voidCommand("/session/%s/buttonup", nil)
 }
 
-func (wd *RemoteWD) SendModifier(modifier string, isDown bool) error {
+func (wd *WebDriver) SendModifier(modifier string, isDown bool) error {
 	if isDown {
 		return wd.KeyDown(modifier)
 	}
 	return wd.KeyUp(modifier)
 }
 
-func (wd *RemoteWD) keyAction(action, keys string) error {
+func (wd *WebDriver) keyAction(action, keys string) error {
 	type keyAction struct {
 		Type string `json:"type"`
 		Key  string `json:"value"`
@@ -1131,7 +1152,7 @@ func (wd *RemoteWD) keyAction(action, keys string) error {
 	})
 }
 
-func (wd *RemoteWD) KeyDown(keys string) error {
+func (wd *WebDriver) KeyDown(keys string) error {
 	// Selenium implemented the actions API but has not yet updated its new
 	// session response.
 	if !wd.w3cCompatible && !(wd.browser == "firefox" && wd.browserVersion.Major > 47) {
@@ -1140,7 +1161,7 @@ func (wd *RemoteWD) KeyDown(keys string) error {
 	return wd.keyAction("keyDown", keys)
 }
 
-func (wd *RemoteWD) KeyUp(keys string) error {
+func (wd *WebDriver) KeyUp(keys string) error {
 	// Selenium implemented the actions API but has not yet updated its new
 	// session response.
 	if !wd.w3cCompatible && !(wd.browser == "firefox" && wd.browserVersion.Major > 47) {
@@ -1174,7 +1195,7 @@ func KeyDownAction(key string) KeyAction {
 	}
 }
 
-// PointerPause builds a PointerAction which pauses for the supplied duration.
+// PointerPauseAction PointerPause builds a PointerAction which pauses for the supplied duration.
 func PointerPauseAction(duration time.Duration) PointerAction {
 	return PointerAction{
 		"type":     "pause",
@@ -1182,7 +1203,7 @@ func PointerPauseAction(duration time.Duration) PointerAction {
 	}
 }
 
-// PointerMove builds a PointerAction which moves the pointer.
+// PointerMoveAction PointerMove builds a PointerAction which moves the pointer.
 func PointerMoveAction(duration time.Duration, offset Point, origin PointerMoveOrigin) PointerAction {
 	return PointerAction{
 		"type":     "pointerMove",
@@ -1193,7 +1214,7 @@ func PointerMoveAction(duration time.Duration, offset Point, origin PointerMoveO
 	}
 }
 
-// PointerUp builds an action which releases the specified pointer key.
+// PointerUpAction PointerUp builds an action which releases the specified pointer key.
 func PointerUpAction(button MouseButton) PointerAction {
 	return PointerAction{
 		"type":   "pointerUp",
@@ -1201,7 +1222,7 @@ func PointerUpAction(button MouseButton) PointerAction {
 	}
 }
 
-// PointerDown builds a PointerAction which presses
+// PointerDownAction PointerDown builds a PointerAction which presses
 // and holds the specified pointer key.
 func PointerDownAction(button MouseButton) PointerAction {
 	return PointerAction{
@@ -1210,7 +1231,7 @@ func PointerDownAction(button MouseButton) PointerAction {
 	}
 }
 
-func (wd *RemoteWD) StoreKeyActions(inputID string, actions ...KeyAction) {
+func (wd *WebDriver) StoreKeyActions(inputID string, actions ...KeyAction) {
 	rawActions := []map[string]interface{}{}
 	for _, action := range actions {
 		rawActions = append(rawActions, action)
@@ -1222,7 +1243,7 @@ func (wd *RemoteWD) StoreKeyActions(inputID string, actions ...KeyAction) {
 	})
 }
 
-func (wd *RemoteWD) StorePointerActions(inputID string, pointer PointerType, actions ...PointerAction) {
+func (wd *WebDriver) StorePointerActions(inputID string, pointer PointerType, actions ...PointerAction) {
 	rawActions := []map[string]interface{}{}
 	for _, action := range actions {
 		rawActions = append(rawActions, action)
@@ -1235,7 +1256,7 @@ func (wd *RemoteWD) StorePointerActions(inputID string, pointer PointerType, act
 	})
 }
 
-func (wd *RemoteWD) PerformActions() error {
+func (wd *WebDriver) PerformActions() error {
 	err := wd.voidCommand("/session/%s/actions", map[string]interface{}{
 		"actions": wd.storedActions,
 	})
@@ -1243,28 +1264,28 @@ func (wd *RemoteWD) PerformActions() error {
 	return err
 }
 
-func (wd *RemoteWD) ReleaseActions() error {
+func (wd *WebDriver) ReleaseActions() error {
 	return voidCommand("DELETE", wd.requestURL("/session/%s/actions", wd.id), nil)
 }
 
-func (wd *RemoteWD) DismissAlert() error {
+func (wd *WebDriver) DismissAlert() error {
 	return wd.voidCommand("/session/%s/alert/dismiss", nil)
 }
 
-func (wd *RemoteWD) AcceptAlert() error {
+func (wd *WebDriver) AcceptAlert() error {
 	return wd.voidCommand("/session/%s/alert/accept", nil)
 }
 
-func (wd *RemoteWD) AlertText() (string, error) {
+func (wd *WebDriver) AlertText() (string, error) {
 	return wd.stringCommand("/session/%s/alert/text")
 }
 
-func (wd *RemoteWD) SetAlertText(text string) error {
+func (wd *WebDriver) SetAlertText(text string) error {
 	data := map[string]string{"text": text}
 	return wd.voidCommand("/session/%s/alert/text", data)
 }
 
-func (wd *RemoteWD) execScriptRaw(script string, args []interface{}, suffix string) ([]byte, error) {
+func (wd *WebDriver) execScriptRaw(script string, args []interface{}, suffix string) ([]byte, error) {
 	if args == nil {
 		args = make([]interface{}, 0)
 	}
@@ -1280,7 +1301,7 @@ func (wd *RemoteWD) execScriptRaw(script string, args []interface{}, suffix stri
 	return wd.execute("POST", wd.requestURL("/session/%s/execute"+suffix, wd.id), data)
 }
 
-func (wd *RemoteWD) execScript(script string, args []interface{}, suffix string) (interface{}, error) {
+func (wd *WebDriver) execScript(script string, args []interface{}, suffix string) (interface{}, error) {
 	response, err := wd.execScriptRaw(script, args, suffix)
 	if err != nil {
 		return nil, err
@@ -1294,35 +1315,36 @@ func (wd *RemoteWD) execScript(script string, args []interface{}, suffix string)
 	return reply.Value, nil
 }
 
-func (wd *RemoteWD) ExecuteScript(script string, args []interface{}) (interface{}, error) {
+func (wd *WebDriver) ExecuteScript(script string, args []interface{}) (interface{}, error) {
 	if !wd.w3cCompatible {
 		return wd.execScript(script, args, "")
 	}
 	return wd.execScript(script, args, "/sync")
 }
 
-func (wd *RemoteWD) ExecuteScriptAsync(script string, args []interface{}) (interface{}, error) {
+func (wd *WebDriver) ExecuteScriptAsync(script string, args []interface{}) (interface{}, error) {
 	if !wd.w3cCompatible {
 		return wd.execScript(script, args, "_async")
 	}
 	return wd.execScript(script, args, "/async")
 }
 
-func (wd *RemoteWD) ExecuteScriptRaw(script string, args []interface{}) ([]byte, error) {
+func (wd *WebDriver) ExecuteScriptRaw(script string, args []interface{}) ([]byte, error) {
 	if !wd.w3cCompatible {
 		return wd.execScriptRaw(script, args, "")
 	}
 	return wd.execScriptRaw(script, args, "/sync")
 }
 
-func (wd *RemoteWD) ExecuteScriptAsyncRaw(script string, args []interface{}) ([]byte, error) {
+func (wd *WebDriver) ExecuteScriptAsyncRaw(script string, args []interface{}) ([]byte, error) {
 	if !wd.w3cCompatible {
 		return wd.execScriptRaw(script, args, "_async")
 	}
 	return wd.execScriptRaw(script, args, "/async")
 }
 
-func (wd *RemoteWD) Screenshot() ([]byte, error) {
+// Screenshot 截图信息
+func (wd *WebDriver) Screenshot() ([]byte, error) {
 	data, err := wd.stringCommand("/session/%s/screenshot")
 	if err != nil {
 		return nil, err
@@ -1331,12 +1353,21 @@ func (wd *RemoteWD) Screenshot() ([]byte, error) {
 	// Selenium returns a base64 encoded image.
 	buf := []byte(data)
 	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
-	return ioutil.ReadAll(decoder)
+	return io.ReadAll(decoder)
+}
+
+// SaveScreenshot 保存截图
+func (wd *WebDriver) SaveScreenshot(filename string) error {
+	data, err := wd.Screenshot()
+	if err != nil {
+		return err
+	}
+	return oss.New(filename, data)
 }
 
 // Condition is an alias for a type that is passed as an argument
 // for selenium.Wait(cond Condition) (error) function.
-type Condition func(wd *RemoteWD) (bool, error)
+type Condition func(wd *WebDriver) (bool, error)
 
 const (
 	// DefaultWaitInterval is the default polling interval for selenium.Wait
@@ -1347,7 +1378,7 @@ const (
 	DefaultWaitTimeout = 60 * time.Second
 )
 
-func (wd *RemoteWD) WaitWithTimeoutAndInterval(condition Condition, timeout, interval time.Duration) error {
+func (wd *WebDriver) WaitWithTimeoutAndInterval(condition Condition, timeout, interval time.Duration) error {
 	startTime := time.Now()
 
 	for {
@@ -1366,15 +1397,15 @@ func (wd *RemoteWD) WaitWithTimeoutAndInterval(condition Condition, timeout, int
 	}
 }
 
-func (wd *RemoteWD) WaitWithTimeout(condition Condition, timeout time.Duration) error {
+func (wd *WebDriver) WaitWithTimeout(condition Condition, timeout time.Duration) error {
 	return wd.WaitWithTimeoutAndInterval(condition, timeout, DefaultWaitInterval)
 }
 
-func (wd *RemoteWD) Wait(condition Condition) error {
+func (wd *WebDriver) Wait(condition Condition) error {
 	return wd.WaitWithTimeoutAndInterval(condition, DefaultWaitTimeout, DefaultWaitInterval)
 }
 
-func (wd *RemoteWD) Log(typ log.Type) ([]log.Message, error) {
+func (wd *WebDriver) Log(typ log.Type) ([]log.Message, error) {
 	url := wd.requestURL("/session/%s/log", wd.id)
 	params := map[string]log.Type{
 		"type": typ,
@@ -1411,231 +1442,4 @@ func (wd *RemoteWD) Log(typ log.Type) ([]log.Message, error) {
 	}
 
 	return val, nil
-}
-
-type remoteWE struct {
-	parent *RemoteWD
-	// Prior to the W3C specification, elements would be returned as a map with
-	// the literal key "ELEMENT" and a value of a UUID. The W3C specification
-	// specifies that this key has changed to an UUID-based string constant and
-	// that the value is called a "reference". For ease of transition, we store
-	// the "reference" in this now misnamed field.
-	id string
-}
-
-func (elem *remoteWE) Click() error {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/click", elem.id)
-	return elem.parent.voidCommand(urlTemplate, nil)
-}
-
-func (elem *remoteWE) SendKeys(keys string) error {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/value", elem.id)
-	return elem.parent.voidCommand(urlTemplate, elem.parent.processKeyString(keys))
-}
-
-func (wd *RemoteWD) processKeyString(keys string) interface{} {
-	if !wd.w3cCompatible {
-		chars := make([]string, len(keys))
-		for i, c := range keys {
-			chars[i] = string(c)
-		}
-		return map[string][]string{"value": chars}
-	}
-	return map[string]string{"text": keys}
-}
-
-func (elem *remoteWE) TagName() (string, error) {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/name", elem.id)
-	return elem.parent.stringCommand(urlTemplate)
-}
-
-func (elem *remoteWE) Text() (string, error) {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/text", elem.id)
-	return elem.parent.stringCommand(urlTemplate)
-}
-
-func (elem *remoteWE) Submit() error {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/submit", elem.id)
-	return elem.parent.voidCommand(urlTemplate, nil)
-}
-
-func (elem *remoteWE) Clear() error {
-	urlTemplate := fmt.Sprintf("/session/%%s/element/%s/clear", elem.id)
-	return elem.parent.voidCommand(urlTemplate, nil)
-}
-
-func (elem *remoteWE) MoveTo(xOffset, yOffset int) error {
-	return elem.parent.voidCommand("/session/%s/moveto", map[string]interface{}{
-		"element": elem.id,
-		"xoffset": xOffset,
-		"yoffset": yOffset,
-	})
-}
-
-func (elem *remoteWE) FindElement(by, value string) (WebElement, error) {
-	url := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
-	response, err := elem.parent.find(by, value, "", url)
-	if err != nil {
-		return nil, err
-	}
-
-	return elem.parent.DecodeElement(response)
-}
-
-func (elem *remoteWE) FindElements(by, value string) ([]WebElement, error) {
-	url := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
-	response, err := elem.parent.find(by, value, "s", url)
-	if err != nil {
-		return nil, err
-	}
-
-	return elem.parent.DecodeElements(response)
-}
-
-func (elem *remoteWE) boolQuery(urlTemplate string) (bool, error) {
-	return elem.parent.boolCommand(fmt.Sprintf(urlTemplate, elem.id))
-}
-
-func (elem *remoteWE) IsSelected() (bool, error) {
-	return elem.boolQuery("/session/%%s/element/%s/selected")
-}
-
-func (elem *remoteWE) IsEnabled() (bool, error) {
-	return elem.boolQuery("/session/%%s/element/%s/enabled")
-}
-
-func (elem *remoteWE) IsDisplayed() (bool, error) {
-	return elem.boolQuery("/session/%%s/element/%s/displayed")
-}
-
-func (elem *remoteWE) GetProperty(name string) (string, error) {
-	template := "/session/%%s/element/%s/property/%s"
-	urlTemplate := fmt.Sprintf(template, elem.id, name)
-
-	return elem.parent.stringCommand(urlTemplate)
-}
-
-func (elem *remoteWE) GetAttribute(name string) (string, error) {
-	template := "/session/%%s/element/%s/attribute/%s"
-	urlTemplate := fmt.Sprintf(template, elem.id, name)
-
-	return elem.parent.stringCommand(urlTemplate)
-}
-
-func round(f float64) int {
-	if f < -0.5 {
-		return int(f - 0.5)
-	}
-	if f > 0.5 {
-		return int(f + 0.5)
-	}
-	return 0
-}
-
-func (elem *remoteWE) location(suffix string) (*Point, error) {
-	if !elem.parent.w3cCompatible {
-		wd := elem.parent
-		path := "/session/%s/element/%s/location" + suffix
-		url := wd.requestURL(path, wd.id, elem.id)
-		response, err := wd.execute("GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		reply := new(struct{ Value rect })
-		if err := json.Unmarshal(response, reply); err != nil {
-			return nil, err
-		}
-		return &Point{round(reply.Value.X), round(reply.Value.Y)}, nil
-	}
-
-	rect, err := elem.rect()
-	if err != nil {
-		return nil, err
-	}
-	return &Point{round(rect.X), round(rect.Y)}, nil
-}
-
-func (elem *remoteWE) Location() (*Point, error) {
-	return elem.location("")
-}
-
-func (elem *remoteWE) LocationInView() (*Point, error) {
-	return elem.location("_in_view")
-}
-
-func (elem *remoteWE) Size() (*Size, error) {
-	if !elem.parent.w3cCompatible {
-		wd := elem.parent
-		url := wd.requestURL("/session/%s/element/%s/size", wd.id, elem.id)
-		response, err := wd.execute("GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		reply := new(struct{ Value rect })
-		if err := json.Unmarshal(response, reply); err != nil {
-			return nil, err
-		}
-		return &Size{round(reply.Value.Width), round(reply.Value.Height)}, nil
-	}
-
-	rect, err := elem.rect()
-	if err != nil {
-		return nil, err
-	}
-
-	return &Size{round(rect.Width), round(rect.Height)}, nil
-}
-
-type rect struct {
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Width  float64 `json:"width"`
-	Height float64 `json:"height"`
-}
-
-// rect implements the "Get Element Rect" method of the W3C standard.
-func (elem *remoteWE) rect() (*rect, error) {
-	wd := elem.parent
-	url := wd.requestURL("/session/%s/element/%s/rect", wd.id, elem.id)
-	response, err := wd.execute("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	r := new(struct{ Value rect })
-	if err := json.Unmarshal(response, r); err != nil {
-		return nil, err
-	}
-	return &r.Value, nil
-}
-
-func (elem *remoteWE) CSSProperty(name string) (string, error) {
-	wd := elem.parent
-	return wd.stringCommand(fmt.Sprintf("/session/%%s/element/%s/css/%s", elem.id, name))
-}
-
-func (elem *remoteWE) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]string{
-		"ELEMENT":            elem.id,
-		webElementIdentifier: elem.id,
-	})
-}
-
-func (elem *remoteWE) Screenshot() ([]byte, error) {
-	data, err := elem.parent.stringCommand(fmt.Sprintf("/session/%%s/element/%s/screenshot", elem.id))
-	if err != nil {
-		return nil, err
-	}
-
-	// Selenium returns a base64 encoded image.
-	buf := []byte(data)
-	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
-	return ioutil.ReadAll(decoder)
-}
-
-func (elem *remoteWE) SaveScreenshot(filename string) error {
-	data, err := elem.Screenshot()
-	if err != nil {
-		return err
-	}
-	return oss.New(filename, data)
 }

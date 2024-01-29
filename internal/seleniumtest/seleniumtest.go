@@ -47,11 +47,11 @@ func runTest(f func(*testing.T, Config), c Config) func(*testing.T) {
 	}
 }
 
-var NewRemote = func(_ *testing.T, caps selenium.Capabilities, addr string) (*selenium.RemoteWD, error) {
+var NewRemote = func(_ *testing.T, caps selenium.Capabilities, addr string) (*selenium.WebDriver, error) {
 	return selenium.NewRemote(caps, addr)
 }
 
-func newRemote(t *testing.T, caps selenium.Capabilities, c Config) *selenium.RemoteWD {
+func newRemote(t *testing.T, caps selenium.Capabilities, c Config) *selenium.WebDriver {
 	wd, err := NewRemote(t, caps, c.Addr)
 	if err != nil {
 		t.Fatalf("NewRemote(%+v, %q) returned error: %v", caps, c.Addr, err)
@@ -117,7 +117,7 @@ func newTestCapabilities(t *testing.T, c Config) selenium.Capabilities {
 	return caps
 }
 
-func quitRemote(t *testing.T, wd *selenium.RemoteWD) {
+func quitRemote(t *testing.T, wd *selenium.WebDriver) {
 	if err := wd.Quit(); err != nil {
 		t.Errorf("wd.Quit() returned error: %v", err)
 	}
@@ -533,7 +533,7 @@ func testFindElement(t *testing.T, c Config) {
 	}
 }
 
-func evaluateElement(t *testing.T, wd *selenium.RemoteWD, elem selenium.WebElement) {
+func evaluateElement(t *testing.T, wd *selenium.WebDriver, elem *selenium.WebElement) {
 	if err := elem.Click(); err != nil {
 		t.Fatalf("wd.FindElement().Click() returned error: %v", err)
 	}
@@ -1420,7 +1420,7 @@ func testSwitchFrame(t *testing.T, c Config) {
 
 func testWait(t *testing.T, c Config) {
 	const newTitle = "Title changed."
-	titleChangeCondition := func(wd *selenium.RemoteWD) (bool, error) {
+	titleChangeCondition := func(wd *selenium.WebDriver) (bool, error) {
 		title, err := wd.Title()
 		if err != nil {
 			return false, err

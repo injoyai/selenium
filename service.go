@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -144,8 +145,9 @@ func HTMLUnit(path string) ServiceOption {
 
 // Service controls a locally-running Selenium subprocess.
 type Service struct {
-	port            int
-	addr            string
+	//port            int
+	url *url.URL
+	//addr            string
 	cmd             *exec.Cmd
 	shutdownURLPath string
 
@@ -159,9 +161,46 @@ type Service struct {
 	output io.Writer
 }
 
+func (s *Service) SetUrl(u string) error {
+	url, err := url.Parse(u)
+	if err != nil {
+		return err
+	}
+	s.url = url
+	return nil
+}
+
+func (s *Service) GetUrl() string {
+	return s.url.String()
+}
+
+func (s *Service) SetOutput(out io.Writer) *Service {
+	s.output = out
+	return s
+}
+
 // FrameBuffer returns the FrameBuffer if one was started by the service and nil otherwise.
-func (s Service) FrameBuffer() *FrameBuffer {
+func (s *Service) FrameBuffer() *FrameBuffer {
 	return s.xvfb
+}
+
+func (s *Service) startChrome(driverPath string) error {
+	cmd := exec.Command(driverPath, "--port="+s.url.Port(), "--url-base="+s.url.Path, "--verbose")
+	cmd.Stderr = s.output
+	cmd.Stdout = s.output
+	cmd.Env = os.Environ()
+	if s.display != "" {
+		cmd.Env = append(cmd.Env, "DISPLAY=:"+s.display)
+	}
+	if s.xauthPath != "" {
+		cmd.Env = append(cmd.Env, "XAUTHORITY="+s.xauthPath)
+	}
+	s.cmd = cmd
+	s.shutdownURLPath = "/shutdown"
+	if err := s.start(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // NewSeleniumService starts a Selenium instance in the background.
@@ -188,7 +227,7 @@ func NewSeleniumService(jarPath string, port int, opts ...ServiceOption) (*Servi
 	s.cmd.Args = append(s.cmd.Args, "-cp", strings.Join(classpath, ":"))
 	s.cmd.Args = append(s.cmd.Args, "org.openqa.grid.selenium.GridLauncherV3", "-port", strconv.Itoa(port), "-debug")
 
-	if err := s.start(port); err != nil {
+	if err := s.start(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -202,7 +241,7 @@ func NewChromeDriverService(path string, port int, opts ...ServiceOption) (*Serv
 		return nil, err
 	}
 	s.shutdownURLPath = "/shutdown"
-	if err := s.start(port); err != nil {
+	if err := s.start(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -215,7 +254,7 @@ func NewGeckoDriverService(path string, port int, opts ...ServiceOption) (*Servi
 	if err != nil {
 		return nil, err
 	}
-	if err := s.start(port); err != nil {
+	if err := s.start(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -223,8 +262,11 @@ func NewGeckoDriverService(path string, port int, opts ...ServiceOption) (*Servi
 
 func newService(cmd *exec.Cmd, urlPrefix string, port int, opts ...ServiceOption) (*Service, error) {
 	s := &Service{
-		port: port,
-		addr: fmt.Sprintf("http://localhost:%d%s", port, urlPrefix),
+		//port: port,
+		//addr: fmt.Sprintf("http://localhost:%d%s", port, urlPrefix),
+	}
+	if err := s.SetUrl(fmt.Sprintf("http://localhost:%d%s", port, urlPrefix)); err != nil {
+		return nil, err
 	}
 	for _, opt := range opts {
 		if err := opt(s); err != nil {
@@ -246,14 +288,14 @@ func newService(cmd *exec.Cmd, urlPrefix string, port int, opts ...ServiceOption
 	return s, nil
 }
 
-func (s *Service) start(port int) error {
+func (s *Service) start() error {
 	if err := s.cmd.Start(); err != nil {
 		return err
 	}
 
 	for i := 0; i < 30; i++ {
 		time.Sleep(time.Second)
-		resp, err := http.Get(s.addr + "/status")
+		resp, err := http.Get(s.url.String() + "/status")
 		if err == nil {
 			resp.Body.Close()
 			switch resp.StatusCode {
@@ -264,7 +306,7 @@ func (s *Service) start(port int) error {
 			}
 		}
 	}
-	return fmt.Errorf("server did not respond on port %d", port)
+	return fmt.Errorf("server did not respond on port %s", s.url.Port())
 }
 
 // Stop shuts down the WebDriver service, and the X virtual frame buffer
@@ -277,7 +319,7 @@ func (s *Service) Stop() error {
 			return err
 		}
 	} else {
-		resp, err := http.Get(s.addr + s.shutdownURLPath)
+		resp, err := http.Get(s.url.String() + s.shutdownURLPath)
 		if err != nil {
 			return err
 		}
