@@ -145,9 +145,7 @@ func HTMLUnit(path string) ServiceOption {
 
 // Service controls a locally-running Selenium subprocess.
 type Service struct {
-	//port            int
-	url *url.URL
-	//addr            string
+	url             *url.URL
 	cmd             *exec.Cmd
 	shutdownURLPath string
 

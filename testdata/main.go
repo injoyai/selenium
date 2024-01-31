@@ -13,7 +13,7 @@ func main() {
 		oss.UserInjoyDir("/browser/chrome/chromedriver.exe"),
 		oss.UserInjoyDir("/browser/chrome/chrome.exe"),
 		func(e *selenium.Entity) error {
-			e.AddArgument()
+			e.SetProxy("127.0.0.1:1081")
 			return nil
 		})
 	if err != nil {

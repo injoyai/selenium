@@ -16,14 +16,20 @@ const (
 
 // HTTPClient is the default client to use to communicate with the WebDriver
 // server.
-var HTTPClient = http.DefaultClient
+var HTTPClient = &http.Client{}
 
+// Debug 设置调试模式,打印日志
 func Debug(b ...bool) {
 	if len(b) == 0 || b[0] {
 		logs.SetLevel(logs.LevelAll)
 	} else {
 		logs.SetLevel(logs.LevelNone)
 	}
+}
+
+// SetLogLevel 设置日志等级
+func SetLogLevel(level logs.Level) {
+	logs.SetLevel(level)
 }
 
 // filteredURL replaces existing password from the given URL.
