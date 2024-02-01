@@ -1,9 +1,12 @@
 package selenium
 
 import (
+	"github.com/fatih/color"
+	"github.com/injoyai/conv"
 	"github.com/injoyai/logs"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 const (
@@ -12,19 +15,28 @@ const (
 
 	// jsonContentType is JSON content type.
 	jsonContentType = "application/json"
+
+	// DefaultWaitInterval is the default polling interval for selenium.Wait
+	// function.
+	DefaultWaitInterval = 100 * time.Millisecond
+
+	// DefaultWaitTimeout is the default timeout for selenium.Wait function.
+	DefaultWaitTimeout = 60 * time.Second
 )
 
 // HTTPClient is the default client to use to communicate with the WebDriver
 // server.
 var HTTPClient = &http.Client{}
 
+func init() {
+	logs.DefaultWrite.SetFormatter(logs.TimeFormatter).SetColor(color.FgMagenta)
+	logs.DefaultRead.SetFormatter(logs.TimeFormatter).SetColor(color.FgMagenta)
+}
+
 // Debug 设置调试模式,打印日志
 func Debug(b ...bool) {
-	if len(b) == 0 || b[0] {
-		logs.SetLevel(logs.LevelAll)
-	} else {
-		logs.SetLevel(logs.LevelNone)
-	}
+	level := conv.Select(len(b) == 0 || b[0], logs.LevelAll, logs.LevelNone)
+	logs.SetLevel(level.(logs.Level))
 }
 
 // SetLogLevel 设置日志等级

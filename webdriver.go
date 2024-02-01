@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/blang/semver"
+	"github.com/injoyai/conv"
+	"github.com/injoyai/goutil/g"
 	"github.com/injoyai/goutil/oss"
 	"github.com/injoyai/logs"
 	"github.com/injoyai/selenium/firefox"
@@ -63,6 +65,11 @@ type WebDriver struct {
 func (this *WebDriver) Copy() *WebDriver {
 	x := *this
 	return &x
+}
+
+// SessionID returns the current session ID
+func (wd *WebDriver) SessionID() string {
+	return wd.id
 }
 
 func newRequest(method string, url string, data []byte) (*http.Request, error) {
@@ -130,7 +137,7 @@ func (wd *WebDriver) execute(method, url string, data []byte) (json.RawMessage, 
 }
 
 func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
-	logs.Debugf("-> %s %s\n%s\n", method, filteredURL(url), string(data))
+	logs.Writef(">>> %s %s %s\n", method, filteredURL(url), string(data))
 	request, err := newRequest(method, url, data)
 	if err != nil {
 		return nil, err
@@ -143,14 +150,15 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 
 	buf, err := io.ReadAll(response.Body)
 	{
-		if err == nil {
-			// Pretty print the JSON response
-			var prettyBuf bytes.Buffer
-			if err = json.Indent(&prettyBuf, buf, "", "    "); err == nil && prettyBuf.Len() > 0 {
-				buf = prettyBuf.Bytes()
-			}
-		}
-		logs.Debugf("<- %s %s\n%s\n", response.Status, response.Header["Content-Type"], string(buf))
+		//if err == nil {
+		//	// Pretty print the JSON response
+		//	var prettyBuf bytes.Buffer
+		//	if err = json.Indent(&prettyBuf, buf, "", "    "); err == nil && prettyBuf.Len() > 0 {
+		//		buf = prettyBuf.Bytes()
+		//	}
+		//}
+		//response.Header["Content-Type"],
+		logs.Readf("<<< %s %s\n", response.Status, string(buf))
 	}
 	if err != nil {
 		return nil, errors.New(response.Status)
@@ -518,16 +526,6 @@ func (wd *WebDriver) NewSession() (string, error) {
 	panic("unreachable")
 }
 
-// SessionID returns the current session ID
-func (wd *WebDriver) SessionID() string {
-	return wd.id
-}
-
-func (wd *WebDriver) SwitchSession(sessionID string) error {
-	wd.id = sessionID
-	return nil
-}
-
 func (wd *WebDriver) Capabilities() (Capabilities, error) {
 	url := wd.requestURL("/session/%s", wd.id)
 	response, err := wd.execute("GET", url, nil)
@@ -566,22 +564,23 @@ func (wd *WebDriver) SetImplicitWaitTimeout(timeout time.Duration) error {
 }
 
 func (wd *WebDriver) SetPageLoadTimeout(timeout time.Duration) error {
+	body := g.Map{}
 	if !wd.w3cCompatible {
-		return wd.voidCommand("/session/%s/timeouts", map[string]interface{}{
-			"ms":   uint(timeout / time.Millisecond),
-			"type": "page load",
-		})
+		body["ms"] = uint(timeout / time.Millisecond)
+		body["type"] = "page load"
+	} else {
+		body["pageLoad"] = uint(timeout / time.Millisecond)
 	}
-	return wd.voidCommand("/session/%s/timeouts", map[string]uint{
-		"pageLoad": uint(timeout / time.Millisecond),
-	})
+	_, err := wd.request(setTimeout, "", "", "", body)
+	return err
 }
 
 func (wd *WebDriver) Quit() error {
 	if wd.id == "" {
 		return nil
 	}
-	_, err := wd.execute("DELETE", wd.requestURL("/session/%s", wd.id), nil)
+	api := getApi(delSession)
+	_, err := wd.execute(api.Method, wd.requestURL(api.Path, wd.id), nil)
 	if err == nil {
 		wd.id = ""
 	}
@@ -589,31 +588,27 @@ func (wd *WebDriver) Quit() error {
 }
 
 func (wd *WebDriver) CurrentWindowHandle() (string, error) {
-	if !wd.w3cCompatible {
-		return wd.stringCommand("/session/%s/window_handle")
-	}
-	return wd.stringCommand("/session/%s/window")
-}
-
-func (wd *WebDriver) WindowHandles() ([]string, error) {
-	if !wd.w3cCompatible {
-		return wd.stringsCommand("/session/%s/window_handles")
-	}
-	return wd.stringsCommand("/session/%s/window/handles")
-}
-
-func (wd *WebDriver) CurrentURL() (string, error) {
-	url := wd.requestURL("/session/%s/url", wd.id)
-	response, err := wd.execute("GET", url, nil)
+	v, err := wd.request(getWindow, "", "", "", nil)
 	if err != nil {
 		return "", err
 	}
-	reply := new(struct{ Value *string })
-	if err := json.Unmarshal(response, reply); err != nil {
+	return conv.String(v), nil
+}
+
+func (wd *WebDriver) WindowHandles() ([]string, error) {
+	v, err := wd.request(getWindows, "", "", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	return conv.Strings(v), nil
+}
+
+func (wd *WebDriver) CurrentURL() (string, error) {
+	v, err := wd.request(getUrl, "", "", "", nil)
+	if err != nil {
 		return "", err
 	}
-
-	return *reply.Value, nil
+	return conv.String(v), nil
 }
 
 func (wd *WebDriver) Get(url string) error {
@@ -1065,19 +1060,17 @@ func (wd *WebDriver) GetCookie(name string) (Cookie, error) {
 }
 
 func (wd *WebDriver) GetCookies() ([]Cookie, error) {
-	url := wd.requestURL("/session/%s/cookie", wd.id)
-	data, err := wd.execute("GET", url, nil)
+	v, err := wd.request(getCookies, "", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
-
-	reply := new(struct{ Value []cookie })
-	if err := json.Unmarshal(data, reply); err != nil {
+	reply := []cookie(nil)
+	if err := json.Unmarshal(conv.Bytes(v), &reply); err != nil {
 		return nil, err
 	}
 
-	cookies := make([]Cookie, len(reply.Value))
-	for i, c := range reply.Value {
+	cookies := make([]Cookie, len(reply))
+	for i, c := range reply {
 		cookies[i] = c.sanitize()
 	}
 	return cookies, nil
@@ -1345,15 +1338,11 @@ func (wd *WebDriver) ExecuteScriptAsyncRaw(script string, args []interface{}) ([
 
 // Screenshot 截图信息
 func (wd *WebDriver) Screenshot() ([]byte, error) {
-	data, err := wd.stringCommand("/session/%s/screenshot")
+	v, err := wd.request(screenshot, "", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
-
-	// Selenium returns a base64 encoded image.
-	buf := []byte(data)
-	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
-	return io.ReadAll(decoder)
+	return base64.StdEncoding.DecodeString(conv.String(v))
 }
 
 // SaveScreenshot 保存截图
@@ -1368,15 +1357,6 @@ func (wd *WebDriver) SaveScreenshot(filename string) error {
 // Condition is an alias for a type that is passed as an argument
 // for selenium.Wait(cond Condition) (error) function.
 type Condition func(wd *WebDriver) (bool, error)
-
-const (
-	// DefaultWaitInterval is the default polling interval for selenium.Wait
-	// function.
-	DefaultWaitInterval = 100 * time.Millisecond
-
-	// DefaultWaitTimeout is the default timeout for selenium.Wait function.
-	DefaultWaitTimeout = 60 * time.Second
-)
 
 func (wd *WebDriver) WaitWithTimeoutAndInterval(condition Condition, timeout, interval time.Duration) error {
 	startTime := time.Now()
@@ -1442,4 +1422,30 @@ func (wd *WebDriver) Log(typ log.Type) ([]log.Message, error) {
 	}
 
 	return val, nil
+}
+
+func (wd *WebDriver) request(key, elementID, shadowID, name string, body interface{}) (interface{}, error) {
+	api := getApi2(key, wd.id, elementID, shadowID, name)
+	req, err := http.NewRequest(api.Method, wd.urlPrefix+api.Path, bytes.NewReader(conv.Bytes(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Accept", jsonContentType)
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("状态码错误: %s", resp.Status)
+	}
+	m := conv.NewMap(resp.Body)
+	status := m.GetInt("status", -1)
+	if status == -1 {
+		return nil, errors.New("未知错误: " + m.String())
+	}
+	if status != 0 {
+		return nil, errors.New(remoteErrors[status])
+	}
+	return m.GetInterface("value"), nil
 }

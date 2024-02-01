@@ -9,6 +9,9 @@ import (
 
 func main() {
 
+	selenium.Debug(true)
+	//logs.DefaultWrite.SetColor(color.FgYellow)
+	//logs.DefaultRead.SetColor(color.FgYellow)
 	wb, err := selenium.Chrome(
 		oss.UserInjoyDir("/browser/chrome/chromedriver.exe"),
 		oss.UserInjoyDir("/browser/chrome/chrome.exe"),
@@ -20,11 +23,16 @@ func main() {
 		logs.Error(err)
 		return
 	}
+	wb.Get("https://www.baidu.com")
+
+	logs.Debug(wb.SaveScreenshot("./testdata/screenshot.png"))
 	for {
-		<-time.After(time.Second * 50)
+		<-time.After(time.Second * 5)
 		logs.Debug(wb.WindowHandles())
 		logs.Debug(wb.CurrentWindowHandle())
-		//logs.Debug(wb.GetActiceHandle())
+		logs.Debug(wb.CurrentURL())
+		logs.Debug(wb.GetCookies())
+
 	}
 
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/injoyai/conv"
 	"github.com/injoyai/goutil/oss"
 	"io"
 )
@@ -162,17 +163,15 @@ func (elem *WebElement) LocationInView() (*Point, error) {
 
 func (elem *WebElement) Size() (*Size, error) {
 	if !elem.parent.w3cCompatible {
-		wd := elem.parent
-		url := wd.requestURL("/session/%s/element/%s/size", wd.id, elem.id)
-		response, err := wd.execute("GET", url, nil)
+		v, err := elem.parent.request(getElementSize, elem.id, "", "", nil)
 		if err != nil {
 			return nil, err
 		}
-		reply := new(struct{ Value rect })
-		if err := json.Unmarshal(response, reply); err != nil {
+		reply := new(rect)
+		if err := json.Unmarshal(conv.Bytes(v), reply); err != nil {
 			return nil, err
 		}
-		return &Size{round(reply.Value.Width), round(reply.Value.Height)}, nil
+		return &Size{round(reply.Width), round(reply.Height)}, nil
 	}
 
 	rect, err := elem.rect()
@@ -192,17 +191,15 @@ type rect struct {
 
 // rect implements the "Get Element Rect" method of the W3C standard.
 func (elem *WebElement) rect() (*rect, error) {
-	wd := elem.parent
-	url := wd.requestURL("/session/%s/element/%s/rect", wd.id, elem.id)
-	response, err := wd.execute("GET", url, nil)
+	v, err := elem.parent.request(getElementRect, elem.id, "", "", nil)
 	if err != nil {
 		return nil, err
 	}
-	r := new(struct{ Value rect })
-	if err := json.Unmarshal(response, r); err != nil {
+	r := new(rect)
+	if err := json.Unmarshal(conv.Bytes(v), r); err != nil {
 		return nil, err
 	}
-	return &r.Value, nil
+	return r, nil
 }
 
 func (elem *WebElement) CSSProperty(name string) (string, error) {
