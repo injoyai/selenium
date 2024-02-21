@@ -27,26 +27,27 @@ import (
 
 // Errors returned by Selenium server.
 var remoteErrors = map[int]string{
-	6:  "invalid session ID",
-	7:  "no such element",
-	8:  "no such frame",
-	9:  "unknown command",
-	10: "stale element reference",
-	11: "element not visible",
-	12: "invalid element state",
-	13: "unknown error",
-	15: "element is not selectable",
-	17: "javascript error",
-	19: "xpath lookup error",
-	21: "timeout",
-	23: "no such window",
-	24: "invalid cookie domain",
-	25: "unable to set cookie",
-	26: "unexpected alert open",
-	27: "no alert open",
-	28: "script timeout",
-	29: "invalid element coordinates",
-	32: "invalid selector",
+	6:   "invalid session ID",
+	7:   "no such element",
+	8:   "no such frame",
+	9:   "unknown command",
+	10:  "stale element reference",
+	11:  "element not visible",
+	12:  "invalid element state",
+	13:  "unknown error",
+	15:  "element is not selectable",
+	17:  "javascript error",
+	19:  "xpath lookup error",
+	21:  "timeout",
+	23:  "no such window",
+	24:  "invalid cookie domain",
+	25:  "unable to set cookie",
+	26:  "unexpected alert open",
+	27:  "no alert open",
+	28:  "script timeout",
+	29:  "invalid element coordinates",
+	32:  "invalid selector",
+	100: "浏览器已关闭",
 }
 
 type WebDriver struct {
@@ -1426,11 +1427,13 @@ func (wd *WebDriver) Log(typ log.Type) ([]log.Message, error) {
 
 func (wd *WebDriver) request(key, elementID, shadowID, name string, body interface{}) (interface{}, error) {
 	api := getApi2(key, wd.id, elementID, shadowID, name)
-	req, err := http.NewRequest(api.Method, wd.urlPrefix+api.Path, bytes.NewReader(conv.Bytes(body)))
+	bodyBytes := conv.Bytes(body)
+	req, err := http.NewRequest(api.Method, wd.urlPrefix+api.Path, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Add("Accept", jsonContentType)
+	logs.Writef(">>> %s %s %s\n", api.Method, api.Path, string(bodyBytes))
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -1439,13 +1442,24 @@ func (wd *WebDriver) request(key, elementID, shadowID, name string, body interfa
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("状态码错误: %s", resp.Status)
 	}
-	m := conv.NewMap(resp.Body)
+	bs, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	logs.Readf("<<< %s %s\n", resp.Status, string(bs))
+	m := conv.NewMap(bs)
 	status := m.GetInt("status", -1)
 	if status == -1 {
 		return nil, errors.New("未知错误: " + m.String())
 	}
 	if status != 0 {
-		return nil, errors.New(remoteErrors[status])
+		if msg := remoteErrors[status]; len(msg) > 0 {
+			return nil, errors.New(remoteErrors[status])
+		}
+		if msg := m.GetString("value.message"); len(msg) > 0 {
+			return nil, errors.New(msg)
+		}
+		return nil, errors.New("未知错误")
 	}
 	return m.GetInterface("value"), nil
 }
